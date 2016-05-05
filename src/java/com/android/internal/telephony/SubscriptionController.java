@@ -997,7 +997,7 @@ public class SubscriptionController extends ISub.Stub {
 
             if (DBG) logdl("[addSubInfoRecord]- info size=" + sSlotIndexToSubId.size());
 
-            if (sSlotIdxToSubId.size() <= 1) {
+            if (PhoneFactory.getSubscriptionInfoUpdater().getInsertedSimCount() <= 1) {
                 PhoneFactory.setSMSPromptEnabled(false);
             }
 
