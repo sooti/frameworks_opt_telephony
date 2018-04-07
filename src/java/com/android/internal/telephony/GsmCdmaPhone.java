@@ -55,6 +55,7 @@ import android.provider.Telephony;
 import android.telecom.VideoProfile;
 import android.telephony.CarrierConfigManager;
 import android.telephony.CellLocation;
+import android.telephony.ims.feature.ImsFeature;
 import android.telephony.ImsiEncryptionInfo;
 import android.telephony.NetworkScanRequest;
 import android.telephony.PhoneNumberUtils;
@@ -68,6 +69,7 @@ import android.telephony.cdma.CdmaCellLocation;
 import android.text.TextUtils;
 import android.util.Log;
 
+import com.android.ims.ImsException;
 import com.android.ims.ImsManager;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.cdma.CdmaMmiCode;
@@ -1069,10 +1071,21 @@ public class GsmCdmaPhone extends Phone {
                  (imsPhone.isVideoEnabled() && VideoProfile.isVideo(videoState)))
                  && (imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE);
 
+        int imsFeatureState = ImsFeature.STATE_NOT_AVAILABLE;
+        try {
+            if (imsPhone != null) {
+                imsFeatureState = ImsManager.getInstance(imsPhone.getContext(),
+                        imsPhone.getPhoneId()).getImsServiceStatus();
+            }
+        } catch (ImsException e) {
+            Log.e(LOG_TAG, "Got ImsException for phoneId " + imsPhone.getPhoneId());
+        }
+
         boolean useImsForEmergency = imsPhone != null
+                && (imsFeatureState == ImsFeature.STATE_READY)
                 && isEmergency
                 && alwaysTryImsForEmergencyCarrierConfig
-                && ImsManager.isNonTtyOrTtyOnVolteEnabled(mContext)
+                && ImsManager.getInstance(mContext, mPhoneId).isNonTtyOrTtyOnVolteEnabledForSlot()
                 && imsPhone.isImsAvailable();
 
         String dialPart = PhoneNumberUtils.extractNetworkPortionAlt(PhoneNumberUtils.
@@ -1095,10 +1108,11 @@ public class GsmCdmaPhone extends Phone {
                     + ", imsPhone.isVideoEnabled()="
                     + ((imsPhone != null) ? imsPhone.isVideoEnabled() : "N/A")
                     + ", imsPhone.getServiceState().getState()="
-                    + ((imsPhone != null) ? imsPhone.getServiceState().getState() : "N/A"));
+                    + ((imsPhone != null) ? imsPhone.getServiceState().getState() : "N/A")
+                    + ", imsphone feature state = " + imsFeatureState);
         }
 
-        Phone.checkWfcWifiOnlyModeBeforeDial(mImsPhone, mContext);
+        checkWfcWifiOnlyModeBeforeDial();
 
         if ((imsUseEnabled && (!isUt || useImsForUt)) || useImsForEmergency) {
             try {
@@ -2213,7 +2227,7 @@ public class GsmCdmaPhone extends Phone {
                     mCi.getVoiceRadioTechnology(obtainMessage(EVENT_REQUEST_VOICE_RADIO_TECH_DONE));
                 }
                 // Force update IMS service
-                ImsManager.updateImsServiceConfig(mContext, mPhoneId, true);
+                ImsManager.getInstance(mContext, mPhoneId).updateImsServiceConfigForSlot(true);
 
                 // Update broadcastEmergencyCallStateChanges
                 CarrierConfigManager configMgr = (CarrierConfigManager)
@@ -2540,6 +2554,7 @@ public class GsmCdmaPhone extends Phone {
                 }
                 mUiccApplication.set(newUiccApplication);
                 mIccRecords.set(newUiccApplication.getIccRecords());
+                logd("mIccRecords = " + mIccRecords);
                 registerForIccRecordEvents();
                 mIccPhoneBookIntManager.updateIccRecords(mIccRecords.get());
             }
@@ -3304,6 +3319,8 @@ public class GsmCdmaPhone extends Phone {
         pw.println("GsmCdmaPhone extends:");
         super.dump(fd, pw, args);
         pw.println(" mPrecisePhoneType=" + mPrecisePhoneType);
+        pw.println(" mSimRecords=" + mSimRecords);
+        pw.println(" mIsimUiccRecords=" + mIsimUiccRecords);
         pw.println(" mCT=" + mCT);
         pw.println(" mSST=" + mSST);
         pw.println(" mPendingMMIs=" + mPendingMMIs);
@@ -3371,7 +3388,8 @@ public class GsmCdmaPhone extends Phone {
     /**
      * @return operator numeric.
      */
-    private String getOperatorNumeric() {
+    @Override
+    public String getOperatorNumeric() {
         String operatorNumeric = null;
         if (isPhoneTypeGsm()) {
             IccRecords r = mIccRecords.get();
